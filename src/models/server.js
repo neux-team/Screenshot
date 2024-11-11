@@ -11,7 +11,6 @@ const PORT = 3000;
 const BASE_PATH = '/api/screenshot-service';
 const BASE_OUTPUT_DIR = '/neux/screenshot-reports/output';
 const ZIP_OUTPUT_DIR = '/neux/screenshot-reports/output';
-const MAX_THREADS = 1;
 const MAX_EXECUTION_TIME = 300000; // 5分鐘超時
 const MAX_FILE_AGE = 7 * 24 * 60 * 60 * 1000; // 7 days
 const sessionData = new Map(); // 改用 Map 來存儲 session 數據
@@ -27,27 +26,13 @@ function ensureDirectoryExists(directory) {
 function cleanupOldFiles() {
   try {
     const now = Date.now();
-    fs.readdir(BASE_OUTPUT_DIR, (err, files) => {
-      if (err) {
-        console.error('Error reading directory:', err);
-        return;
+    const files = fs.readdirSync(BASE_OUTPUT_DIR);
+    files.forEach(file => {
+      const filePath = path.join(BASE_OUTPUT_DIR, file);
+      const stats = fs.statSync(filePath);
+      if (now - stats.mtime.getTime() > MAX_FILE_AGE) {
+        fs.unlinkSync(filePath);
       }
-      files.forEach(file => {
-        const filePath = path.join(BASE_OUTPUT_DIR, file);
-        fs.stat(filePath, (err, stats) => {
-          if (err) {
-            console.error(`Error getting stats for ${file}:`, err);
-            return;
-          }
-          if (now - stats.mtime.getTime() > MAX_FILE_AGE) {
-            fs.unlink(filePath, (err) => {
-              if (err) {
-                console.error(`Error deleting ${file}:`, err);
-              }
-            });
-          }
-        });
-      });
     });
   } catch (error) {
     console.error('Error in cleanup:', error);
@@ -78,7 +63,7 @@ app.use(cors({
 // Worker 管理函數
 async function terminateWorker(worker) {
   try {
-    await worker.terminate();
+    worker.terminate();
   } catch (error) {
     console.error('Error terminating worker:', error);
   }
@@ -87,7 +72,7 @@ async function terminateWorker(worker) {
 // 添加 URL 處理和延遲函數
 function groupAndSortUrls(urls) {
   const urlGroups = new Map();
-  
+
   // 將 URL 按域名分組並排序
   urls.forEach(url => {
     try {
@@ -97,7 +82,7 @@ function groupAndSortUrls(urls) {
         urlGroups.set(domain, []);
       }
       const urlList = urlGroups.get(domain);
-      
+
       // 根路徑放到最後
       if (urlObj.pathname === '/' || urlObj.pathname === '') {
         urlList.push(url);
@@ -108,21 +93,20 @@ function groupAndSortUrls(urls) {
       console.error(`Invalid URL: ${url}`, error);
     }
   });
-   // 展平並返回排序後的 URL 列表
-   const sortedUrls = [];
-   urlGroups.forEach(urls => {
-     sortedUrls.push(...urls);
-   });
-   
-   return sortedUrls;
- }
+  // 展平並返回排序後的 URL 列表
+  const sortedUrls = [];
+  urlGroups.forEach(urls => {
+    sortedUrls.push(...urls);
+  });
 
- const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
+  return sortedUrls;
+}
 
+const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
 
 async function cleanupWorkers(workers) {
   try {
-    await Promise.all(workers.map(worker => terminateWorker(worker)));
+    workers.forEach(worker => terminateWorker(worker));
     workers.length = 0;
   } catch (error) {
     console.error('Error cleaning up workers:', error);
@@ -138,26 +122,25 @@ app.post(`${BASE_PATH}/screenshot`, async (req, res) => {
     'Content-Type': 'application/json'
   };
   Object.entries(corsHeaders).forEach(([key, value]) => res.header(key, value));
-  
+
   let timeoutId;
   const workers = [];
 
   try {
     const { urls: originalUrls, headerHeight, widths, heights, fullPage, browserType, username, password, sessionId } = req.body;
-    
+
     // 處理並排序 URLs
     const sortedUrls = groupAndSortUrls(originalUrls);
-    
+
     const timestamp = Date.now();
     const screenshotDir = `screenshots_${sessionId}_${timestamp}`;
     const outputDir = path.join(BASE_OUTPUT_DIR, screenshotDir);
     const zipFilePath = path.join(ZIP_OUTPUT_DIR, `${screenshotDir}.zip`);
-    
+
     ensureDirectoryExists(outputDir);
-    
+
     const totalTasks = sortedUrls.length * widths.length;
     let completedTasks = 0;
-    let activeThreads = 0;
     const queue = [];
 
     sessionData.set(sessionId, {
@@ -214,7 +197,6 @@ app.post(`${BASE_PATH}/screenshot`, async (req, res) => {
         });
 
         worker.on('exit', async (code) => {
-          activeThreads--;
           if (code !== 0) {
             console.error(`Worker stopped with exit code ${code}`);
           }
@@ -226,7 +208,6 @@ app.post(`${BASE_PATH}/screenshot`, async (req, res) => {
         });
 
         workers.push(worker);
-        activeThreads++;
       } catch (error) {
         console.error('Error creating worker:', error);
         throw error;
@@ -237,16 +218,16 @@ app.post(`${BASE_PATH}/screenshot`, async (req, res) => {
       return new Promise((resolve, reject) => {
         const archive = archiver('zip', { zlib: { level: 9 } });
         const output = fs.createWriteStream(outputPath);
-        
+
         output.on('close', resolve);
         archive.on('error', reject);
-        
+
         archive.pipe(output);
         files.forEach((file) => {
           const filePath = path.join(outputDir, file);
           archive.file(filePath, { name: file });
         });
-        
+
         archive.finalize();
       });
     };
@@ -278,15 +259,15 @@ app.post(`${BASE_PATH}/screenshot`, async (req, res) => {
         clearTimeout(timeoutId);
         const sessionInfo = sessionData.get(sessionId);
         fs.writeFileSync(jsonFilePath, JSON.stringify(sessionInfo, null, 2));
-        
+
         const allFiles = fs.readdirSync(outputDir);
         await compressFiles(allFiles, zipFilePath);
-        
+
         // 清理資源
         await cleanupWorkers(workers);
         sessionData.delete(sessionId);
-        
-        res.json({ 
+
+        res.json({
           downloadLinks: [`${BASE_PATH}/output/${screenshotDir}.zip`],
           outputDir: `${BASE_PATH}/output/${screenshotDir}`,
         });
@@ -302,12 +283,11 @@ app.post(`${BASE_PATH}/screenshot`, async (req, res) => {
       }
     });
 
-    // 啟動初始工作
-    const initialTasks = tasks.slice(0, MAX_THREADS);
-    const remainingTasks = tasks.slice(MAX_THREADS);
-    queue.push(...remainingTasks);
-
-    await Promise.all(initialTasks.map(task => createWorker(task)));
+    // 啟動所有工作
+    queue.push(...tasks);
+    if (queue.length > 0) {
+      await createWorker(queue.shift());
+    }
 
   } catch (error) {
     console.error('Error in screenshot endpoint:', error);
@@ -326,9 +306,9 @@ app.get(`${BASE_PATH}/screenshot-progress`, (req, res) => {
     'Access-Control-Allow-Credentials': 'true',
   };
   Object.entries(corsHeaders).forEach(([key, value]) => res.header(key, value));
-  
+
   const sessionId = req.query.sessionId;
-  
+
   res.setHeader('Content-Type', 'text/event-stream');
   res.setHeader('Cache-Control', 'no-cache');
   res.setHeader('Connection', 'keep-alive');
@@ -350,11 +330,8 @@ app.get(`${BASE_PATH}/screenshot-progress`, (req, res) => {
 process.on('SIGTERM', async () => {
   console.log('Received SIGTERM signal. Cleaning up...');
   try {
-    const sessions = Array.from(sessionData.keys());
-    for (const sessionId of sessions) {
-      await cleanupWorkers(workers);
-      sessionData.delete(sessionId);
-    }
+    await cleanupWorkers(Array.from(sessionData.keys()).map(sessionId => sessionData.get(sessionId).workers));
+    sessionData.clear();
     process.exit(0);
   } catch (error) {
     console.error('Error during cleanup:', error);
