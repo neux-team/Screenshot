@@ -64,7 +64,7 @@ async function waitForPageLoad(page, url) {
 }
 
 async function takeScreenshot() {
-  console.log(`[takeScreenshot]`);
+  console.log(`[takeScreenshot]開始`);
   const { url, headerHeight, width, height, fullPage, browserType, username, password, outputDir, isFirstWidth } = workerData;
 
   try {
@@ -178,6 +178,7 @@ async function takeScreenshot() {
           fullPage: false,
           timeout: 30000  // 分段截圖的超時時間
         });
+        console.log(`更新後的 yOffset: ${yOffset} totalHeight: ${totalHeight}`);
         console.log(`分段截圖 ${part} 已儲存至 ${partFilePath}`);
 
         part += 1;
@@ -187,7 +188,7 @@ async function takeScreenshot() {
           yOffset = scrollBottom;
         }
 
-        console.log(`更新後的 yOffset: ${yOffset} totalHeight: ${totalHeight}`);
+        
       }
     }
 
@@ -196,18 +197,14 @@ async function takeScreenshot() {
 
   } catch (error) {
     console.error(`截圖過程發生錯誤 (${url}, 寬度 ${width}):`, error);
-    try {
-      if (browser) {
-        await browser.close();
-      }
-    } catch (closeError) {
-      console.error('關閉瀏覽器時發生錯誤:', closeError);
-    }
   }
 }
 
 takeScreenshot()
-  .then(() => process.exit(0))
+  .then(() => {
+    console.log('截圖作業完成');
+    process.exit(0)
+  })
   .catch((error) => {
     console.error('Worker 執行錯誤:', error);
     process.exit(1);
