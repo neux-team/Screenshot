@@ -12,7 +12,7 @@ const BASE_PATH = '/api/screenshot-service';
 const BASE_OUTPUT_DIR = '/neux/screenshot-reports/output';
 const ZIP_OUTPUT_DIR = '/neux/screenshot-reports/output';
 const MAX_EXECUTION_TIME = 300000; // 5分鐘超時
-const MAX_FILE_AGE = 7 * 24 * 60 * 60 * 1000; // 7 days
+const MAX_FILE_AGE = 3 * 24 * 60 * 60 * 1000; // 3 days
 const sessionData = new Map(); // 改用 Map 來存儲 session 數據
 
 // 確保目錄存在的函數
@@ -123,8 +123,18 @@ app.post(`${BASE_PATH}/screenshot`, async (req, res) => {
   };
   Object.entries(corsHeaders).forEach(([key, value]) => res.header(key, value));
 
-  let timeoutId;
+  // let timeoutId;
   const workers = [];
+
+  // 新增一個定時器來檢查 log 的更新
+  const logCheckInterval = setInterval(async () => {
+    if (Date.now() - lastLogTime > MAX_EXECUTION_TIME) {
+      await cleanupWorkers(workers);
+      sessionData.delete(sessionId);
+      res.status(408).json({ error: 'Operation timed out due to inactivity' });
+      clearInterval(logCheckInterval);
+    }
+  }, 10000); // 每10秒檢查一次
 
   try {
     const { urls: originalUrls, headerHeight, widths, heights, fullPage, browserType, username, password, sessionId } = req.body;
@@ -149,15 +159,26 @@ app.post(`${BASE_PATH}/screenshot`, async (req, res) => {
     });
 
     // 設置超時處理
-    timeoutId = setTimeout(async () => {
-      if (completedTasks !== totalTasks) {
-        await cleanupWorkers(workers);
-        sessionData.delete(sessionId);
-        res.status(408).json({ error: 'Operation timed out' });
-      }
-    }, MAX_EXECUTION_TIME);
+    // timeoutId = setTimeout(async () => {
+    //   if (completedTasks !== totalTasks) {
+    //     await cleanupWorkers(workers);
+    //     sessionData.delete(sessionId);
+    //     res.status(408).json({ error: 'Operation timed out' });
+    //   }
+    // }, MAX_EXECUTION_TIME);
 
     const createWorker = async (workerData) => {
+
+      worker.on('message', (progress) => {
+        lastLogTime = Date.now(); // 更新最後一次收到 log 的時間
+        if (progress.title) {
+          // ... existing code ...
+        } else {
+          completedTasks += progress.completed;
+          progressEmitter.emit('progress', { completedTasks, totalTasks, sessionId });
+        }
+      });
+
       try {
         // 為同域名的請求添加延遲
         if (queue.length > 0) {
@@ -256,7 +277,8 @@ app.post(`${BASE_PATH}/screenshot`, async (req, res) => {
 
     progressEmitter.once(`complete_${sessionId}`, async () => {
       try {
-        clearTimeout(timeoutId);
+        // clearTimeout(timeoutId);
+        clearInterval(logCheckInterval); 
         const sessionInfo = sessionData.get(sessionId);
         fs.writeFileSync(jsonFilePath, JSON.stringify(sessionInfo, null, 2));
 
@@ -291,7 +313,7 @@ app.post(`${BASE_PATH}/screenshot`, async (req, res) => {
 
   } catch (error) {
     console.error('Error in screenshot endpoint:', error);
-    clearTimeout(timeoutId);
+    clearInterval(logCheckInterval); // 清除定時器
     await cleanupWorkers(workers);
     sessionData.delete(sessionId);
     res.status(500).json({ error: error.message });
