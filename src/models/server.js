@@ -327,17 +327,17 @@ app.get(`${BASE_PATH}/screenshot-progress`, (req, res) => {
 });
 
 // 優雅關閉
-process.on('SIGTERM', async () => {
-  console.log('Received SIGTERM signal. Cleaning up...');
-  try {
-    await cleanupWorkers(Array.from(sessionData.keys()).map(sessionId => sessionData.get(sessionId).workers));
-    sessionData.clear();
-    process.exit(0);
-  } catch (error) {
-    console.error('Error during cleanup:', error);
-    process.exit(1);
-  }
-});
+// process.on('SIGTERM', async () => {
+//   console.log('Received SIGTERM signal. Cleaning up...');
+//   try {
+//     await cleanupWorkers(Array.from(sessionData.keys()).map(sessionId => sessionData.get(sessionId).workers));
+//     sessionData.clear();
+//     process.exit(0);
+//   } catch (error) {
+//     console.error('Error during cleanup:', error);
+//     process.exit(1);
+//   }
+// });
 
 app.listen(PORT, '0.0.0.0', () => {
   console.log(`Server is running on http://localhost:${PORT}`);
