@@ -63,7 +63,7 @@ app.use(cors({
 // Worker 管理函數
 async function terminateWorker(worker) {
   try {
-    if (worker) {
+    if (worker && worker.terminate) {
       await worker.terminate();
     } else {
       console.warn('Attempted to terminate an undefined worker');
