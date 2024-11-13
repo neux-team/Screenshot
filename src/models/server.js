@@ -63,11 +63,7 @@ app.use(cors({
 // Worker 管理函數
 async function terminateWorker(worker) {
   try {
-    if (worker) {
-      await worker.terminate();
-    } else {
-      console.warn('Attempted to terminate an undefined worker');
-    }
+    worker.terminate();
   } catch (error) {
     console.error('Error terminating worker:', error);
   }
@@ -110,8 +106,7 @@ const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
 
 async function cleanupWorkers(workers) {
   try {
-    // 過濾掉 undefined 或 null 的 worker
-    workers.filter(worker => worker).forEach(worker => terminateWorker(worker));
+    workers.forEach(worker => terminateWorker(worker));
     workers.length = 0;
   } catch (error) {
     console.error('Error cleaning up workers:', error);
@@ -157,20 +152,13 @@ app.post(`${BASE_PATH}/screenshot`, async (req, res) => {
     timeoutId = setTimeout(async () => {
       if (completedTasks !== totalTasks) {
         await cleanupWorkers(workers);
-        if (sessionData.has(sessionId)) {
-          sessionData.delete(sessionId);
-        }
+        sessionData.delete(sessionId);
         res.status(408).json({ error: 'Operation timed out' });
       }
     }, MAX_EXECUTION_TIME);
 
     const createWorker = async (workerData) => {
       try {
-        // 檢查 workerData 的結構
-        if (!workerData || !workerData.url || !workerData.outputDir) {
-          throw new Error('Invalid workerData');
-        }
-
         // 為同域名的請求添加延遲
         if (queue.length > 0) {
           const currentUrlObj = new URL(workerData.url);
@@ -187,7 +175,7 @@ app.post(`${BASE_PATH}/screenshot`, async (req, res) => {
 
         worker.on('message', (progress) => {
           if (progress.title) {
-            const sessionInfo = sessionData.get(workerData.sessionId);
+            const sessionInfo = sessionData.get(sessionId);
             if (sessionInfo) {
               const existingEntry = sessionInfo.datas.find(item => item.url === workerData.url);
               if (!existingEntry) {
@@ -199,7 +187,7 @@ app.post(`${BASE_PATH}/screenshot`, async (req, res) => {
             }
           } else {
             completedTasks += progress.completed;
-            progressEmitter.emit('progress', { completedTasks, totalTasks, sessionId: workerData.sessionId });
+            progressEmitter.emit('progress', { completedTasks, totalTasks, sessionId });
           }
         });
 
@@ -270,9 +258,9 @@ app.post(`${BASE_PATH}/screenshot`, async (req, res) => {
       try {
         clearTimeout(timeoutId);
         const sessionInfo = sessionData.get(sessionId);
-        await fs.promises.writeFile(jsonFilePath, JSON.stringify(sessionInfo, null, 2));
+        fs.writeFileSync(jsonFilePath, JSON.stringify(sessionInfo, null, 2));
 
-        const allFiles = await fs.promises.readdir(outputDir);
+        const allFiles = fs.readdirSync(outputDir);
         await compressFiles(allFiles, zipFilePath);
 
         // 清理資源
@@ -305,9 +293,7 @@ app.post(`${BASE_PATH}/screenshot`, async (req, res) => {
     console.error('Error in screenshot endpoint:', error);
     clearTimeout(timeoutId);
     await cleanupWorkers(workers);
-    if (sessionData.has(sessionId)) {
-      sessionData.delete(sessionId);
-    }
+    sessionData.delete(sessionId);
     res.status(500).json({ error: error.message });
   }
 });
@@ -341,17 +327,17 @@ app.get(`${BASE_PATH}/screenshot-progress`, (req, res) => {
 });
 
 // 優雅關閉
-// process.on('SIGTERM', async () => {
-//   console.log('Received SIGTERM signal. Cleaning up...');
-//   try {
-//     await cleanupWorkers(Array.from(sessionData.keys()).map(sessionId => sessionData.get(sessionId).workers));
-//     sessionData.clear();
-//     process.exit(0);
-//   } catch (error) {
-//     console.error('Error during cleanup:', error);
-//     process.exit(1);
-//   }
-// });
+process.on('SIGTERM', async () => {
+  console.log('Received SIGTERM signal. Cleaning up...');
+  try {
+    await cleanupWorkers(Array.from(sessionData.keys()).map(sessionId => sessionData.get(sessionId).workers));
+    sessionData.clear();
+    process.exit(0);
+  } catch (error) {
+    console.error('Error during cleanup:', error);
+    process.exit(1);
+  }
+});
 
 app.listen(PORT, '0.0.0.0', () => {
   console.log(`Server is running on http://localhost:${PORT}`);
