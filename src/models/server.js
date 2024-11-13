@@ -232,8 +232,11 @@ app.post(`${BASE_PATH}/screenshot`, async (req, res) => {
       });
     };
 
+    
     // 創建工作隊列
     const tasks = [];
+    console.log('開始創建工作隊列');
+    
     sortedUrls.forEach((url) => {
       widths.forEach((width, i) => {
         tasks.push({
@@ -330,7 +333,15 @@ app.get(`${BASE_PATH}/screenshot-progress`, (req, res) => {
 process.on('SIGTERM', async () => {
   console.log('Received SIGTERM signal. Cleaning up...');
   try {
-    await cleanupWorkers(Array.from(sessionData.keys()).map(sessionId => sessionData.get(sessionId).workers));
+    const allWorkers = Array.from(sessionData.keys()).reduce((acc, sessionId) => {
+      const session = sessionData.get(sessionId);
+      if (session && session.workers) {
+        acc.push(...session.workers);
+      }
+      return acc;
+    }, []);
+
+    await cleanupWorkers(allWorkers);
     sessionData.clear();
     process.exit(0);
   } catch (error) {
