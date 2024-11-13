@@ -63,11 +63,7 @@ app.use(cors({
 // Worker 管理函數
 async function terminateWorker(worker) {
   try {
-    if (worker && worker.terminate) {
-      await worker.terminate();
-    } else {
-      console.warn('Attempted to terminate an undefined worker');
-    }
+    worker.terminate();
   } catch (error) {
     console.error('Error terminating worker:', error);
   }
@@ -118,8 +114,6 @@ async function cleanupWorkers(workers) {
 }
 
 app.post(`${BASE_PATH}/screenshot`, async (req, res) => {
-  console.log('開始運行 #001');
-  
   const corsHeaders = {
     'Access-Control-Allow-Origin': '*',
     'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS',
@@ -237,10 +231,12 @@ app.post(`${BASE_PATH}/screenshot`, async (req, res) => {
         archive.finalize();
       });
     };
-    
 
+    
     // 創建工作隊列
     const tasks = [];
+    console.log('開始創建工作隊列');
+    
     sortedUrls.forEach((url) => {
       widths.forEach((width, i) => {
         tasks.push({
@@ -334,17 +330,25 @@ app.get(`${BASE_PATH}/screenshot-progress`, (req, res) => {
 });
 
 // 優雅關閉
-// process.on('SIGTERM', async () => {
-//   console.log('Received SIGTERM signal. Cleaning up...');
-//   try {
-//     await cleanupWorkers(Array.from(sessionData.keys()).map(sessionId => sessionData.get(sessionId).workers));
-//     sessionData.clear();
-//     process.exit(0);
-//   } catch (error) {
-//     console.error('Error during cleanup:', error);
-//     process.exit(1);
-//   }
-// });
+process.on('SIGTERM', async () => {
+  console.log('Received SIGTERM signal. Cleaning up...');
+  try {
+    const allWorkers = Array.from(sessionData.keys()).reduce((acc, sessionId) => {
+      const session = sessionData.get(sessionId);
+      if (session && session.workers) {
+        acc.push(...session.workers);
+      }
+      return acc;
+    }, []);
+
+    await cleanupWorkers(allWorkers);
+    sessionData.clear();
+    process.exit(0);
+  } catch (error) {
+    console.error('Error during cleanup:', error);
+    process.exit(1);
+  }
+});
 
 app.listen(PORT, '0.0.0.0', () => {
   console.log(`Server is running on http://localhost:${PORT}`);
