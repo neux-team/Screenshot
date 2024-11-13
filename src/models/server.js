@@ -64,7 +64,7 @@ app.use(cors({
 async function terminateWorker(worker) {
   try {
     if (worker) {
-      worker.terminate();
+      await worker.terminate();
     } else {
       console.warn('Attempted to terminate an undefined worker');
     }
@@ -110,7 +110,8 @@ const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
 
 async function cleanupWorkers(workers) {
   try {
-    workers.forEach(worker => terminateWorker(worker));
+    // 過濾掉 undefined 或 null 的 worker
+    workers.filter(worker => worker).forEach(worker => terminateWorker(worker));
     workers.length = 0;
   } catch (error) {
     console.error('Error cleaning up workers:', error);
