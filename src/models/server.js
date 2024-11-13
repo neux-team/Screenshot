@@ -153,16 +153,23 @@ app.post(`${BASE_PATH}/screenshot`, async (req, res) => {
     });
 
     // 設置超時處理
-    timeoutId = setTimeout(async () => {
+    timeoutId = async () => {
       if (completedTasks !== totalTasks) {
         await cleanupWorkers(workers);
-        sessionData.delete(sessionId);
+        if(!!sessionData){
+          sessionData.delete(sessionId);
+        }
         res.status(408).json({ error: 'Operation timed out' });
       }
-    }, MAX_EXECUTION_TIME);
+    };
 
     const createWorker = async (workerData) => {
       try {
+        // 檢查 workerData 的結構
+        if (!workerData || !workerData.url || !workerData.outputDir) {
+          throw new Error('Invalid workerData');
+        }
+
         // 為同域名的請求添加延遲
         if (queue.length > 0) {
           const currentUrlObj = new URL(workerData.url);
@@ -179,7 +186,7 @@ app.post(`${BASE_PATH}/screenshot`, async (req, res) => {
 
         worker.on('message', (progress) => {
           if (progress.title) {
-            const sessionInfo = sessionData.get(sessionId);
+            const sessionInfo = sessionData.get(workerData.sessionId);
             if (sessionInfo) {
               const existingEntry = sessionInfo.datas.find(item => item.url === workerData.url);
               if (!existingEntry) {
@@ -191,7 +198,7 @@ app.post(`${BASE_PATH}/screenshot`, async (req, res) => {
             }
           } else {
             completedTasks += progress.completed;
-            progressEmitter.emit('progress', { completedTasks, totalTasks, sessionId });
+            progressEmitter.emit('progress', { completedTasks, totalTasks, sessionId: workerData.sessionId });
           }
         });
 
@@ -295,7 +302,7 @@ app.post(`${BASE_PATH}/screenshot`, async (req, res) => {
 
   } catch (error) {
     console.error('Error in screenshot endpoint:', error);
-    clearTimeout(timeoutId);
+    // clearTimeout(timeoutId);
     await cleanupWorkers(workers);
     sessionData.delete(sessionId);
     res.status(500).json({ error: error.message });
