@@ -153,15 +153,15 @@ app.post(`${BASE_PATH}/screenshot`, async (req, res) => {
     });
 
     // 設置超時處理
-    timeoutId = async () => {
+    timeoutId = setTimeout(async () => {
       if (completedTasks !== totalTasks) {
         await cleanupWorkers(workers);
-        if(!!sessionData){
+        if (sessionData.has(sessionId)) {
           sessionData.delete(sessionId);
         }
         res.status(408).json({ error: 'Operation timed out' });
       }
-    };
+    }, MAX_EXECUTION_TIME);
 
     const createWorker = async (workerData) => {
       try {
@@ -269,9 +269,9 @@ app.post(`${BASE_PATH}/screenshot`, async (req, res) => {
       try {
         clearTimeout(timeoutId);
         const sessionInfo = sessionData.get(sessionId);
-        fs.writeFileSync(jsonFilePath, JSON.stringify(sessionInfo, null, 2));
+        await fs.promises.writeFile(jsonFilePath, JSON.stringify(sessionInfo, null, 2));
 
-        const allFiles = fs.readdirSync(outputDir);
+        const allFiles = await fs.promises.readdir(outputDir);
         await compressFiles(allFiles, zipFilePath);
 
         // 清理資源
@@ -302,9 +302,11 @@ app.post(`${BASE_PATH}/screenshot`, async (req, res) => {
 
   } catch (error) {
     console.error('Error in screenshot endpoint:', error);
-    // clearTimeout(timeoutId);
+    clearTimeout(timeoutId);
     await cleanupWorkers(workers);
-    sessionData.delete(sessionId);
+    if (sessionData.has(sessionId)) {
+      sessionData.delete(sessionId);
+    }
     res.status(500).json({ error: error.message });
   }
 });
